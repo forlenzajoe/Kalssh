@@ -1,0 +1,19 @@
+[Unit]
+Description=Kalshi weather edge watcher (paper/research; phone-notifies on genuine edges)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# __DIR__ and __USER__ are filled in by deploy/bootstrap.sh.
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/.venv/bin/python -m src.cli watch --interval 120
+Restart=always
+RestartSec=15
+User=__USER__
+# Keep logs in the journal; view with: journalctl -u kalshi-watcher -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

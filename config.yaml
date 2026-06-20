@@ -1,0 +1,152 @@
+# =============================================================================
+# Kalshi Weather Scanner — main configuration
+# All values can be overridden by environment variables (see .env.example).
+# =============================================================================
+
+# Global run mode.
+#   "mock"  never touches the network; uses bundled fixtures (great for demos/tests).
+#   "live"  pulls REAL Kalshi market data (public, no API key needed for reads) and
+#           REAL weather from NWS. No order placement ever happens.
+# If a live fetch fails (no network), the system falls back to mock with a warning.
+mode: live                      # mock | live
+
+# --- Safety: paper trading only in v1 ----------------------------------------
+trading:
+  paper_only: true              # HARD guard. Live order placement is not implemented.
+  bankroll_usd: 1000.0          # Notional bankroll used for sizing/backtests.
+
+# --- Kalshi ------------------------------------------------------------------
+kalshi:
+  env: prod                     # demo | prod (overridden by KALSHI_ENV). Live market
+                                # data (reads) is public on prod; no key required.
+  # Explicit weather SERIES tickers to pull in live mode (fast, targeted). These
+  # are Kalshi's daily high-temperature series. Add LOW/RAIN/SNOW series here as
+  # Kalshi lists them — unknown/empty series are skipped harmlessly.
+  weather_series:
+    - KXHIGHNY                  # New York City (Central Park / KNYC)
+    - KXHIGHCHI                 # Chicago
+    - KXHIGHLAX                 # Los Angeles
+    - KXHIGHMIA                 # Miami
+    - KXHIGHAUS                 # Austin
+    - KXHIGHDEN                 # Denver
+    - KXHIGHPHIL                # Philadelphia
+  # Fallback prefixes/keywords for the generic "scan all markets" path.
+  weather_series_prefixes:
+    - KXHIGH
+    - KXLOW
+    - HIGH
+    - LOW
+    - TEMP
+    - RAIN
+    - PRECIP
+    - SNOW
+    - WIND
+  weather_keywords:             # fallback keyword match on title/category
+    - temperature
+    - high temp
+    - low temp
+    - rain
+    - rainfall
+    - precipitation
+    - snow
+    - snowfall
+    - wind
+
+# --- Fees / microstructure assumptions ---------------------------------------
+# Kalshi trading fee model: fee = round_up(fee_rate * contracts * P * (1 - P))
+# where P is price in dollars (0..1). These are conservative defaults.
+fees:
+  trade_fee_rate: 0.07          # Kalshi general markets fee coefficient
+  maker_fee_rate: 0.0           # most weather markets are taker-only here
+  assume_taker: true            # we cross the spread (pay the ask)
+  slippage_cents: 1             # extra cents of adverse fill assumed per side
+
+# --- Weather sources ---------------------------------------------------------
+weather:
+  # "ensemble" = multi-model consensus + cross-model spread for forecasts, with
+  # NWS for settlement-grade observations/intraday (validated strongest setup).
+  primary_source: ensemble      # ensemble | nws | open_meteo
+  cache_ttl_minutes: 30
+  # Horizon (days ahead) -> 1-sigma forecast error for HIGH/LOW temp, in °F.
+  # PROVISIONAL fit from ~12 days of settled Kalshi outcomes + Open-Meteo
+  # forecasts (scripts/recalibrate_sigma.py, 2026-06). Out-of-sample Brier 0.121
+  # vs 0.139 naive baseline. RE-FIT with more history before trusting live edges.
+  temp_error_sigma_f:
+    0: 1.7
+    1: 2.0
+    2: 2.4
+    3: 2.7
+    4: 3.1
+    5: 3.4
+    6: 3.8
+    7: 4.2
+
+# --- Probability model -------------------------------------------------------
+model:
+  # intraday_temp = the edge model: conditions same-day temp markets on live
+  # observations-so-far, and falls back to the transparent baseline otherwise.
+  default: intraday_temp        # intraday_temp | normal_forecast | ensemble | sklearn
+  # Fallback additive bias correction (°F) for stations without a specific fit.
+  bias_correction_f: 0.0
+  # Per-station bias (°F), fit on the TRUE day-of forecast against ~2 months of
+  # settled Kalshi outcomes, validated out-of-sample (scripts/fit_station_params.py;
+  # overall test Brier 0.112 vs 0.139 naive). Forecast error is station-specific.
+  # RE-FIT periodically as more history accrues.
+  station_bias_f:
+    nyc: -0.5
+    lax: 1.0
+    aus: 1.0
+    mia: 1.5
+    phl: 1.0
+    chi: 0.0
+    den: 1.0
+  # Adaptive per-day sigma from cross-model spread: sigma = a + b * spread(°F).
+  # Fit out-of-sample (scripts/ensemble_validation.py): logloss 0.377 -> 0.356.
+  ensemble_sigma:
+    a: 1.0
+    b: 0.25
+  # Confidence penalties (multiplicative, applied to a base of 1.0).
+  confidence:
+    ambiguous_settlement_penalty: 0.4
+    long_horizon_days: 7        # horizons beyond this get penalized
+    long_horizon_penalty: 0.6
+    missing_forecast_penalty: 0.0   # if no forecast: confidence -> 0 (skip)
+
+# --- Edge / scanning ---------------------------------------------------------
+scanner:
+  min_volume: 0                 # informational; risk gate uses liquidity score
+  top_n: 25
+
+# --- Risk controls (all gates must pass to recommend a Buy) -------------------
+risk:
+  min_edge: 0.05                # min gross edge (|fair - implied|) to act
+  min_ev_after_fees: 0.02       # min expected value per contract after fees ($)
+  min_confidence: 0.50          # skip low-confidence signals
+  min_liquidity_score: 0.30     # 0..1; penalizes thin books
+  max_spread_cents: 8           # avoid wide markets
+  max_position_per_market_usd: 50.0
+  max_daily_exposure_usd: 200.0
+  avoid_ambiguous_settlement: true
+  kelly_fraction: 0.25          # fractional Kelly for position sizing
+
+# --- Paper trading -----------------------------------------------------------
+paper_trading:
+  store: sqlite                 # sqlite | csv
+  sqlite_path: data/paper_trades.sqlite
+  csv_path: data/paper_trades.csv
+  signal_threshold_edge: 0.05   # log a paper trade when edge >= this
+
+# --- Notifications (edge watcher) --------------------------------------------
+notifications:
+  # Phone push via ntfy.sh (free, no account). To receive alerts on your phone:
+  #   1. Install the "ntfy" app (iOS/Android).
+  #   2. Subscribe to EXACTLY this topic name (it's private because it's random).
+  #   3. Leave the watcher running — pushes arrive when a real edge is found.
+  ntfy_topic: kalshi-edge-f4f7917f
+  ntfy_server: https://ntfy.sh
+  desktop: true                 # also show a Windows desktop pop-up
+
+# --- Logging -----------------------------------------------------------------
+logging:
+  level: INFO
+  file: data/scanner.log
