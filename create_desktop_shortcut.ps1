@@ -4,13 +4,17 @@
 
 $ErrorActionPreference = "Stop"
 $proj    = Split-Path -Parent $MyInvocation.MyCommand.Path
-$pyw     = Join-Path $proj ".venv\Scripts\pythonw.exe"
+# The venv may live inside the project or outside OneDrive (per-machine).
+$pyw = @(
+    (Join-Path $proj ".venv\Scripts\pythonw.exe"),
+    (Join-Path $env:USERPROFILE "venvs\kalssh\Scripts\pythonw.exe")
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
 $target  = Join-Path $proj "desktop_app.py"
 $desktop = [Environment]::GetFolderPath('Desktop')
 $lnkPath = Join-Path $desktop "Kalshi Weather Scanner.lnk"
 
-if (-not (Test-Path $pyw)) {
-    throw "Virtual environment not found at $pyw. Create it first (see README)."
+if (-not $pyw) {
+    throw "No virtual environment found (.venv or ~\venvs\kalssh). Create one first (see README)."
 }
 
 $shell = New-Object -ComObject WScript.Shell

@@ -88,16 +88,16 @@ model:
   default: intraday_temp        # intraday_temp | normal_forecast | ensemble | sklearn
   # Fallback additive bias correction (°F) for stations without a specific fit.
   bias_correction_f: 0.0
-  # Per-station bias (°F), fit on the TRUE day-of forecast against ~2 months of
-  # settled Kalshi outcomes, validated out-of-sample (scripts/fit_station_params.py;
-  # overall test Brier 0.112 vs 0.139 naive). Forecast error is station-specific.
-  # RE-FIT periodically as more history accrues.
+  # Per-station bias (°F), fit on the TRUE day-of forecast against settled
+  # Kalshi outcomes, validated out-of-sample (scripts/fit_station_params.py;
+  # overall test Brier 0.112 vs 0.139 naive; last re-fit 2026-07-19). Forecast
+  # error is station-specific. RE-FIT periodically as more history accrues.
   station_bias_f:
-    nyc: -0.5
+    nyc: -2.0
     lax: 1.0
-    aus: 1.0
+    aus: 1.5
     mia: 1.5
-    phl: 1.0
+    phl: 1.5
     chi: 0.0
     den: 1.0
   # Adaptive per-day sigma from cross-model spread: sigma = a + b * spread(°F).

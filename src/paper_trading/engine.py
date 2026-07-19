@@ -85,14 +85,21 @@ class PaperTradingEngine:
             logger.warning("paper_only is False but live trading is NOT implemented; "
                            "continuing in paper mode.")
         logged: list[PaperTrade] = []
+        # A market/side pair is logged at most once across its lifetime, so
+        # repeated scans (e.g. from the watcher loop) don't duplicate trades.
+        already = {(r["ticker"], r["side"]) for r in self.store.all()}
         for opp in opportunities:
             if not opp.action.startswith("Buy"):
                 continue
             if abs(opp.gross_edge) < self.threshold or opp.suggested_contracts <= 0:
                 continue
+            side = "yes" if opp.best_side == "yes" else "no"
+            if (opp.ticker, side) in already:
+                continue
             trade = PaperTrade.from_opportunity(opp)
             self.store.insert(trade)
             logged.append(trade)
+            already.add((opp.ticker, side))
             logger.info("Logged paper trade %s %s x%d @ %.2f (edge %.3f)",
                         trade.action, trade.ticker, trade.contracts,
                         trade.entry_price, trade.edge)

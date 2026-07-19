@@ -8,8 +8,12 @@
 
 $ErrorActionPreference = "Stop"
 $proj = Split-Path -Parent $MyInvocation.MyCommand.Path
-$pyw  = Join-Path $proj ".venv\Scripts\pythonw.exe"
-if (-not (Test-Path $pyw)) { throw "venv not found at $pyw (see README setup)." }
+# The venv may live inside the project or outside OneDrive (per-machine).
+$pyw = @(
+    (Join-Path $proj ".venv\Scripts\pythonw.exe"),
+    (Join-Path $env:USERPROFILE "venvs\kalssh\Scripts\pythonw.exe")
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $pyw) { throw "No venv found (.venv or ~\venvs\kalssh); see README setup." }
 
 $startup = [Environment]::GetFolderPath('Startup')
 $lnk = Join-Path $startup "KalshiEdgeWatcher.lnk"
