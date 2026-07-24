@@ -95,6 +95,37 @@ def cmd_settle(args, config) -> int:
     return 0
 
 
+def cmd_autosettle(args, config) -> int:
+    """Settle every open paper trade whose market has a real Kalshi result."""
+    import requests
+
+    engine = PaperTradingEngine(config)
+    api = "https://api.elections.kalshi.com/trade-api/v2/markets/"
+    session = requests.Session()
+    n = wins = 0
+    pnl = 0.0
+    for row in engine.store.all():
+        if row.get("status") != "open":
+            continue
+        try:
+            market = session.get(api + row["ticker"], timeout=15).json()["market"]
+        except Exception as exc:
+            print(f"  {row['ticker']}: fetch failed ({exc}); left open")
+            continue
+        result = (market.get("result") or "").lower()
+        if result not in ("yes", "no"):
+            continue
+        trade = engine.settle(row["id"], result)
+        if trade is not None:
+            n += 1
+            wins += trade.settlement_outcome == trade.side
+            pnl += trade.realized_pnl or 0.0
+            print(f"  settled {trade.ticker}: outcome={result} "
+                  f"PnL=${trade.realized_pnl:+.2f}")
+    print(f"Auto-settled {n} trade(s) | wins {wins}/{n} | realized ${pnl:+.2f}")
+    return 0
+
+
 def cmd_history(args, config) -> int:
     engine = PaperTradingEngine(config)
     rows = engine.history()
@@ -190,6 +221,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     h = sub.add_parser("history", help="Show paper-trade history.")
     h.set_defaults(func=cmd_history)
+
+    a = sub.add_parser("autosettle",
+                       help="Settle open paper trades from real Kalshi results.")
+    a.set_defaults(func=cmd_autosettle)
 
     w = sub.add_parser("watch", help="Continuously watch for genuine model-free edges.")
     w.add_argument("--interval", type=int, default=60, help="Seconds between scans.")
