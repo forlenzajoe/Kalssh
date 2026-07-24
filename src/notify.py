@@ -39,7 +39,9 @@ def push_notify(topic: str, title: str, message: str,
         resp = requests.post(
             f"{server.rstrip('/')}/{topic}",
             data=message.encode("utf-8"),
-            headers={"Title": safe_title, "Priority": priority, "Tags": "money_with_wings"},
+            headers={"Title": safe_title, "Priority": priority, "Tags": "money_with_wings",
+                     # Tapping the notification opens Kalshi to act on the edge.
+                     "Click": "https://kalshi.com/markets"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -74,8 +76,11 @@ def notify_edges(alerts: list["EdgeAlert"], config: Config) -> None:
     topic = str(cfg.get("ntfy_topic", "") or "")
     server = str(cfg.get("ntfy_server", "https://ntfy.sh"))
 
-    lines = [f"{a.action} {a.market}  (+{a.net_edge_cents:.1f}c/contract, "
-             f"{a.contracts_available} fillable)" for a in alerts]
+    # Each line carries everything needed to place the bet by hand:
+    # side, market, max entry price, net edge after fees, and fillable size.
+    lines = [f"{a.action} {a.market} @ up to {a.cost_cents:.0f}c "
+             f"(net +{a.net_edge_cents:.1f}c/ct, {a.contracts_available} fillable)"
+             for a in alerts]
     body = "\n".join(lines)
     title = f"Kalshi edge x{len(alerts)}"
 
