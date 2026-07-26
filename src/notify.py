@@ -14,7 +14,7 @@ the free, legitimate equivalent.
 from __future__ import annotations
 
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import requests
 
@@ -27,21 +27,58 @@ if TYPE_CHECKING:
 logger = get_logger("notify")
 
 
+def market_url(ticker: str) -> str:
+    """Web URL for the Kalshi page where a market ticker can be traded.
+
+    A market ticker is ``SERIES-EVENT_DATE-STRIKE`` (e.g.
+    ``KXHIGHPHIL-26JUL26-B86.5``). Kalshi's tradable page is the *event* page,
+    which lists every strike for that day, at
+    ``kalshi.com/markets/<series>/<series>-<date>`` (all lowercase). Individual
+    strikes are not separately addressable, so this lands on the day's ladder
+    with the target strike visible. Falls back to the series page, then the
+    market index, if the ticker has an unexpected shape.
+    """
+    base = "https://kalshi.com/markets"
+    # Arb alerts use "TICKER_A | TICKER_B"; link the first leg.
+    first = ticker.split("|")[0].strip()
+    parts = first.split("-")
+    if len(parts) >= 2:
+        series, date = parts[0].lower(), parts[1].lower()
+        return f"{base}/{series}/{series}-{date}"
+    if parts and parts[0]:
+        return f"{base}/{parts[0].lower()}"
+    return base
+
+
 def push_notify(topic: str, title: str, message: str,
-                server: str = "https://ntfy.sh", priority: str = "high") -> bool:
-    """Send a phone push via ntfy. Returns True on success."""
+                server: str = "https://ntfy.sh", priority: str = "high",
+                click: Optional[str] = None,
+                actions: Optional[list[tuple[str, str]]] = None) -> bool:
+    """Send a phone push via ntfy. Returns True on success.
+
+    ``click`` is the URL opened by tapping the notification; ``actions`` adds up
+    to three tappable buttons as ``(label, url)`` pairs.
+    """
     if not topic:
         return False
     # HTTP headers must be Latin-1; strip non-encodable chars (e.g. emoji) from
     # the title. The message body is sent as UTF-8 and may contain anything.
     safe_title = title.encode("ascii", "ignore").decode().strip() or "Kalshi edge"
+    headers = {"Title": safe_title, "Priority": priority, "Tags": "money_with_wings",
+               # Tapping the notification opens the market to act on the edge.
+               "Click": click or "https://kalshi.com/markets"}
+    if actions:
+        # ntfy caps this at 3; commas/semicolons are separators so strip them.
+        specs = []
+        for label, url in actions[:3]:
+            clean = label.replace(",", " ").replace(";", " ").strip()
+            specs.append(f"view, {clean}, {url}, clear=true")
+        headers["Actions"] = "; ".join(specs).encode("ascii", "ignore").decode()
     try:
         resp = requests.post(
             f"{server.rstrip('/')}/{topic}",
             data=message.encode("utf-8"),
-            headers={"Title": safe_title, "Priority": priority, "Tags": "money_with_wings",
-                     # Tapping the notification opens Kalshi to act on the edge.
-                     "Click": "https://kalshi.com/markets"},
+            headers=headers,
             timeout=10,
         )
         resp.raise_for_status()
@@ -98,20 +135,23 @@ def notify_signals(trades: list, config: Config) -> int:
                     len(trades))
         return 0
 
-    lines = []
+    lines, actions = [], []
     for t in keep:
+        url = market_url(t.ticker)
         lines.append(
             f"{t.action} {t.ticker} @ up to {t.entry_price * 100:.0f}c "
             f"x{t.contracts} (~${t.stake_usd:.0f}) | model {t.fair_value:.0%} "
-            f"vs market {t.entry_price:.0%}"
+            f"vs market {t.entry_price:.0%}\n{url}"
         )
-    body = "\n".join(lines) + "\n\nPaper signal - you decide and place it yourself."
+        actions.append((t.ticker.split("-")[0].replace("KXHIGH", "") or "market", url))
+    body = "\n\n".join(lines) + "\n\nPaper signal - you decide and place it yourself."
     title = f"Kalshi signal x{len(keep)}"
 
     topic = str(cfg.get("ntfy_topic", "") or "")
     if topic:
         ok = push_notify(topic, title, body,
-                         server=str(cfg.get("ntfy_server", "https://ntfy.sh")))
+                         server=str(cfg.get("ntfy_server", "https://ntfy.sh")),
+                         click=market_url(keep[0].ticker), actions=actions)
         logger.info("Signal push %s for %d signal(s).", "sent" if ok else "FAILED", len(keep))
     if cfg.get("desktop", True):
         desktop_notify(title, lines[0])
@@ -130,12 +170,16 @@ def notify_edges(alerts: list["EdgeAlert"], config: Config) -> None:
     # side, market, max entry price, net edge after fees, and fillable size.
     lines = [f"{a.action} {a.market} @ up to {a.cost_cents:.0f}c "
              f"(net +{a.net_edge_cents:.1f}c/ct, {a.contracts_available} fillable)"
+             f"\n{market_url(a.market)}"
              for a in alerts]
-    body = "\n".join(lines)
+    body = "\n\n".join(lines)
     title = f"Kalshi edge x{len(alerts)}"
 
     if topic:
-        ok = push_notify(topic, title, body, server=server)
+        actions = [(a.market.split("-")[0].replace("KXHIGH", "") or "market",
+                    market_url(a.market)) for a in alerts]
+        ok = push_notify(topic, title, body, server=server,
+                         click=market_url(alerts[0].market), actions=actions)
         logger.info("Phone push %s for %d edge(s).", "sent" if ok else "FAILED", len(alerts))
     else:
         logger.info("No ntfy_topic configured; skipping phone push.")
