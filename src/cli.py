@@ -23,6 +23,7 @@ from pathlib import Path
 from .backtest.engine import run_backtest, run_synthetic_backtest
 from .backtest.report import format_summary, write_html_report
 from .edge_watcher import scan_for_edges
+from .notify import notify_signals
 from .paper_trading.engine import PaperTradingEngine
 from .scanner import scan
 from .utils.config import load_config
@@ -69,6 +70,11 @@ def cmd_scan(args, config) -> int:
         engine = PaperTradingEngine(config)
         logged = engine.record_signals(opps)
         print(f"Logged {len(logged)} paper trade(s) to the trade store.")
+        # Only newly logged trades are pushed, so repeat scans never re-alert
+        # on a market you have already been told about.
+        pushed = notify_signals(logged, config)
+        if pushed:
+            print(f"Pushed {pushed} high-conviction signal(s) to your phone.")
     return 0
 
 

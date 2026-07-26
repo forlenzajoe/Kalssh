@@ -146,6 +146,19 @@ notifications:
   ntfy_server: https://ntfy.sh
   desktop: true                 # also show a Windows desktop pop-up
 
+  # Push MODEL-based Buy signals too (the watcher alone only pushes the much
+  # rarer model-free locked/arb edges). Thresholds fit on 35 settled paper
+  # trades, 2026-07-26: the losses concentrated in cheap entries and huge
+  # claimed edges -- exactly where the model is overconfident, not where the
+  # market is wrong. Filtered subset went 14/15; unfiltered went 26/35.
+  # That 14/15 is IN-SAMPLE on a small, day-correlated set: expect materially
+  # worse going forward, and re-fit these as the settled record grows.
+  signal_alerts:
+    enabled: true
+    min_entry_price: 0.60       # skip cheap lottery tickets (<0.55 went 4/9)
+    max_edge: 0.25              # "too good to be true" cap (>0.25 went 4/8)
+    min_fair_value: 0.85        # only high-conviction sides
+
 # --- Logging -----------------------------------------------------------------
 logging:
   level: INFO

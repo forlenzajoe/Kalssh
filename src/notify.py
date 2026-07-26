@@ -68,6 +68,56 @@ def desktop_notify(title: str, message: str) -> bool:
         return False
 
 
+def notify_signals(trades: list, config: Config) -> int:
+    """Push model-based Buy signals that clear the high-conviction quality bar.
+
+    These are *model* signals, not the model-free locked/arb edges that
+    ``notify_edges`` handles, so they are filtered harder. The thresholds are
+    fit on settled paper trades (see ``notifications.signal_alerts`` in
+    config.yaml) and exist to drop the "too good to be true" signals, which the
+    settled record shows are where the model is wrong rather than the market:
+    cheap entries and huge claimed edges lost money, moderate ones won.
+
+    Returns the number of signals pushed.
+    """
+    cfg = config.get("notifications", {}) or {}
+    sig = cfg.get("signal_alerts", {}) or {}
+    if not sig.get("enabled", False) or not trades:
+        return 0
+
+    min_entry = float(sig.get("min_entry_price", 0.60))
+    max_edge = float(sig.get("max_edge", 0.25))
+    min_fair = float(sig.get("min_fair_value", 0.85))
+
+    keep = [t for t in trades
+            if t.entry_price >= min_entry
+            and abs(t.edge) <= max_edge
+            and t.fair_value >= min_fair]
+    if not keep:
+        logger.info("No signals cleared the alert quality bar (%d candidate(s)).",
+                    len(trades))
+        return 0
+
+    lines = []
+    for t in keep:
+        lines.append(
+            f"{t.action} {t.ticker} @ up to {t.entry_price * 100:.0f}c "
+            f"x{t.contracts} (~${t.stake_usd:.0f}) | model {t.fair_value:.0%} "
+            f"vs market {t.entry_price:.0%}"
+        )
+    body = "\n".join(lines) + "\n\nPaper signal - you decide and place it yourself."
+    title = f"Kalshi signal x{len(keep)}"
+
+    topic = str(cfg.get("ntfy_topic", "") or "")
+    if topic:
+        ok = push_notify(topic, title, body,
+                         server=str(cfg.get("ntfy_server", "https://ntfy.sh")))
+        logger.info("Signal push %s for %d signal(s).", "sent" if ok else "FAILED", len(keep))
+    if cfg.get("desktop", True):
+        desktop_notify(title, lines[0])
+    return len(keep)
+
+
 def notify_edges(alerts: list["EdgeAlert"], config: Config) -> None:
     """Fire phone + desktop notifications for a batch of fresh edge alerts."""
     if not alerts:
