@@ -15,6 +15,9 @@ env/
 data/cache/
 data/*.sqlite
 data/*.db
+# Trade-history exports used to move the record between machines. The repo is
+# public; the settled track record is yours and stays out of it.
+data/paper_trades_export.csv
 reports/*.html
 reports/*.png
 
