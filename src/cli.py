@@ -23,6 +23,7 @@ from pathlib import Path
 from .backtest.engine import run_backtest, run_synthetic_backtest
 from .backtest.report import format_summary, write_html_report
 from .edge_watcher import scan_for_edges
+from .health import gather_health, record_scan, report_health
 from .notify import notify_signals
 from .paper_trading.engine import PaperTradingEngine
 from .scanner import scan
@@ -49,8 +50,14 @@ def _print_opportunities(opps, top_n: int) -> None:
         )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def cmd_scan(args, config) -> int:
     opps = scan(config)
+    # Stamp the scan before anything optional runs, so stall detection reflects
+    # "the scanner reached the market", not "every downstream step succeeded".
+    record_scan(ROOT)
     top_n = args.top or int(config.get("scanner.top_n", 25))
     print(f"\nMode: {config.mode.upper()} | Markets evaluated: {len(opps)}\n")
     _print_opportunities(opps, top_n)
@@ -130,6 +137,23 @@ def cmd_autosettle(args, config) -> int:
                   f"PnL=${trade.realized_pnl:+.2f}")
     print(f"Auto-settled {n} trade(s) | wins {wins}/{n} | realized ${pnl:+.2f}")
     return 0
+
+
+def cmd_health(args, config) -> int:
+    """Report liveness: print a summary, and push it unless --no-push."""
+    h = gather_health(config, ROOT)
+    age = "never" if h["scan_age_hours"] is None else f"{h['scan_age_hours']:.1f}h ago"
+    print(f"last successful scan : {age}")
+    print(f"stalled              : {h['stalled']} "
+          f"(threshold {h['stale_after_hours']:.0f}h)")
+    print(f"kalshi-watcher       : {h['watcher']}")
+    print(f"kalshi-signals.timer : {h['timer']}")
+    print(f"signals logged 24h   : {h['trades_24h']}")
+    print(f"track record         : {h['trades_settled']} settled of "
+          f"{h['trades_total']}, paper P&L ${h['realized_pnl']:+.2f}")
+    if not args.no_push:
+        report_health(config, ROOT)
+    return 1 if h["stalled"] else 0
 
 
 def cmd_history(args, config) -> int:
@@ -231,6 +255,11 @@ def build_parser() -> argparse.ArgumentParser:
     a = sub.add_parser("autosettle",
                        help="Settle open paper trades from real Kalshi results.")
     a.set_defaults(func=cmd_autosettle)
+
+    hb = sub.add_parser("health", help="Report liveness (heartbeat) to phone.")
+    hb.add_argument("--no-push", action="store_true",
+                    help="Print the report without sending a notification.")
+    hb.set_defaults(func=cmd_health)
 
     w = sub.add_parser("watch", help="Continuously watch for genuine model-free edges.")
     w.add_argument("--interval", type=int, default=60, help="Seconds between scans.")

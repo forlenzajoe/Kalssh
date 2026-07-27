@@ -159,6 +159,17 @@ notifications:
     max_edge: 0.25              # "too good to be true" cap (>0.25 went 4/8)
     min_fair_value: 0.85        # only high-conviction sides
 
+  # Daily liveness report, so a quiet phone means "no edge found" instead of
+  # "silently broken" -- those look identical otherwise. Escalates to an urgent
+  # push if scans have stalled. See src/health.py for the three failure layers.
+  heartbeat:
+    enabled: true
+    stale_after_hours: 6        # scans run every 4h; 6h without one is a stall
+    # Optional external dead-man's-switch (e.g. a healthchecks.io ping URL).
+    # Covers total server death, which the server itself cannot report. Pinged
+    # only while healthy, so a stall correctly stops the pings.
+    deadman_url: ""
+
 # --- Logging -----------------------------------------------------------------
 logging:
   level: INFO
