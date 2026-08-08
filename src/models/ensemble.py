@@ -75,6 +75,21 @@ class SklearnProbabilityModel(ProbabilityModel):
                            notes=["Trained sklearn predict_proba."])
 
 
+def _maybe_calibrate(config: Config, model: ProbabilityModel) -> ProbabilityModel:
+    """Wrap in the fitted calibration layer when enabled.
+
+    Applied last, so it corrects whatever model actually produced the estimate.
+    Refit with ``scripts/fit_calibration.py``; leave disabled if that script
+    reports no held-out improvement.
+    """
+    cal = config.get("model.calibration", {}) or {}
+    if not cal.get("enabled", False):
+        return model
+    from .calibration import CalibratedModel
+
+    return CalibratedModel(model, float(cal.get("a", 1.0)), float(cal.get("b", 0.0)))
+
+
 def build_model(config: Config) -> ProbabilityModel:
     """Construct the model named by ``model.default`` in config."""
     name = str(config.get("model.default", "normal_forecast"))
@@ -91,16 +106,17 @@ def build_model(config: Config) -> ProbabilityModel:
         ensemble_sigma_b=(float(ens["b"]) if "b" in ens else None),
     )
     if name == "normal_forecast":
-        return baseline
-    if name == "intraday_temp":
+        chosen = baseline
+    elif name == "intraday_temp":
         from .intraday import IntradayTemperatureModel
 
-        return IntradayTemperatureModel(baseline=baseline)
-    if name == "ensemble":
+        chosen = IntradayTemperatureModel(baseline=baseline)
+    elif name == "ensemble":
         from .intraday import IntradayTemperatureModel
 
-        return EnsembleModel([baseline, IntradayTemperatureModel(baseline=baseline)])
-    if name == "sklearn":
-        return SklearnProbabilityModel(fallback=baseline)
-    # Unknown -> baseline.
-    return baseline
+        chosen = EnsembleModel([baseline, IntradayTemperatureModel(baseline=baseline)])
+    elif name == "sklearn":
+        chosen = SklearnProbabilityModel(fallback=baseline)
+    else:
+        chosen = baseline  # Unknown -> baseline.
+    return _maybe_calibrate(config, chosen)

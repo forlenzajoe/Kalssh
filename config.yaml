@@ -107,6 +107,17 @@ model:
   ensemble_sigma:
     a: 1.0
     b: 0.25
+  # Platt calibration of the final probability: p = sigmoid(a * logit(p) + b).
+  # The model is measurably overconfident, and that error inflates every edge
+  # and EV downstream. Fitted out-of-sample on 3192 settled markets
+  # (scripts/fit_calibration.py, 2026-08-08): held-out logloss 0.3784 -> 0.3433,
+  # Brier 0.1229 -> 0.1130. a<1 shrinks estimates toward 50%.
+  # This DELIBERATELY reduces signal volume - it removes edge that was an
+  # artifact of overstated confidence. Re-fit with the script; do not hand-tune.
+  calibration:
+    enabled: true
+    a: 0.80
+    b: 0.45
   # Confidence penalties (multiplicative, applied to a base of 1.0).
   confidence:
     ambiguous_settlement_penalty: 0.4
