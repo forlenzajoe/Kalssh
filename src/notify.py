@@ -105,6 +105,41 @@ def desktop_notify(title: str, message: str) -> bool:
         return False
 
 
+def _reality_check(config: Config) -> str:
+    """A one-line honest footer: what signals like this have ACTUALLY done.
+
+    The model's stated conviction is measurably optimistic -- across settled
+    paper trades it has claimed ~86% and delivered ~74% -- so the claimed
+    percentage must never reach the phone without the realised rate beside it.
+    Reads the live trade store so the number stays current instead of drifting
+    into a stale hard-coded boast.
+    """
+    fallback = ("This is a model signal, NOT a guaranteed winner. It loses "
+                "sometimes. Only bet money you can afford to lose.")
+    try:
+        import sqlite3
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        db = root / str(config.get("paper_trading.sqlite_path",
+                                   "data/paper_trades.sqlite"))
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        row = con.execute(
+            "select count(*), "
+            "sum(case when settlement_outcome = side then 1 else 0 end), "
+            "avg(fair_value) from paper_trades where status='settled'"
+        ).fetchone()
+        n, wins, avg_fair = row[0] or 0, row[1] or 0, row[2] or 0.0
+        if n < 10:
+            return fallback
+        return (f"REALITY CHECK: past signals claimed {avg_fair:.0%} on average "
+                f"and actually won {wins / n:.0%} ({wins}/{n} settled). The "
+                f"model runs optimistic. This can lose - only bet what you can "
+                f"afford to lose.")
+    except Exception:  # never let the footer break an alert
+        return fallback
+
+
 def notify_signals(trades: list, config: Config) -> int:
     """Push model-based Buy signals that clear the high-conviction quality bar.
 
@@ -155,10 +190,7 @@ def notify_signals(trades: list, config: Config) -> int:
         )
         actions.append((t.ticker.split("-")[0].replace("KXHIGH", "") or "market", url))
 
-    body = "\n\n".join(blocks) + (
-        "\n\nThis is a model signal, NOT a guaranteed winner. It loses "
-        f"sometimes. Only bet money you can afford to lose."
-    )
+    body = "\n\n".join(blocks) + "\n\n" + _reality_check(config)
     if len(keep) == 1:
         t = keep[0]
         city = t.ticker.split("-")[0].replace("KXHIGH", "") or "market"

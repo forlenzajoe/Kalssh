@@ -90,14 +90,16 @@ model:
   bias_correction_f: 0.0
   # Per-station bias (°F), fit on the TRUE day-of forecast against settled
   # Kalshi outcomes, validated out-of-sample (scripts/fit_station_params.py;
-  # overall test Brier 0.112 vs 0.139 naive; last re-fit 2026-07-19). Forecast
-  # error is station-specific. RE-FIT periodically as more history accrues.
+  # overall test Brier 0.1141 vs 0.1389 naive; last re-fit 2026-08-08).
+  # Forecast error is station-specific. RE-FIT periodically as history accrues.
+  # Drift since the 2026-07-19 fit: lax 1.0 -> 0.5, mia 1.5 -> 1.0,
+  # phl 1.5 -> 2.0. Biases move; stale ones quietly degrade the fair values.
   station_bias_f:
     nyc: -2.0
-    lax: 1.0
+    lax: 0.5
     aus: 1.5
-    mia: 1.5
-    phl: 1.5
+    mia: 1.0
+    phl: 2.0
     chi: 0.0
     den: 1.0
   # Adaptive per-day sigma from cross-model spread: sigma = a + b * spread(°F).
