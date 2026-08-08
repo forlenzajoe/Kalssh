@@ -144,12 +144,36 @@ def main() -> None:
 
     # --- Top opportunities ---------------------------------------------------
     with tab_opps:
-        # Plain-English "what to bet" panel — the recommended plays only.
-        plays = [details[t] for t in df[df["action"].str.startswith("Buy")]["ticker"]]
-        plays.sort(key=lambda o: o.ev_after_fees, reverse=True)
+        # Plain-English "what to bet" panel. This panel used to show every Buy
+        # signal, including the ones the settled record shows lose money (cheap
+        # entries / outsized claimed edges). It now applies the SAME quality bar
+        # as the phone alerts, and demotes the rest, so the dashboard and your
+        # phone can never disagree about what is worth acting on.
+        sig = (config.get("notifications.signal_alerts", {}) or {})
+        min_entry = float(sig.get("min_entry_price", 0.60))
+        max_edge = float(sig.get("max_edge", 0.25))
+        min_fair = float(sig.get("min_fair_value", 0.85))
+
+        def _entry_cost(o):
+            return (o.yes_ask_prob if o.action == "Buy YES" else o.no_ask_prob) or 0.0
+
+        def _fair_for_side(o):
+            return o.fair_yes if o.action == "Buy YES" else o.fair_no
+
+        def _clears_bar(o):
+            return (_entry_cost(o) >= min_entry
+                    and abs(o.gross_edge) <= max_edge
+                    and _fair_for_side(o) >= min_fair)
+
+        all_buys = [details[t] for t in df[df["action"].str.startswith("Buy")]["ticker"]]
+        plays = sorted([o for o in all_buys if _clears_bar(o)],
+                       key=lambda o: o.ev_after_fees, reverse=True)
+        demoted = sorted([o for o in all_buys if not _clears_bar(o)],
+                         key=lambda o: o.ev_after_fees, reverse=True)
+
         st.header(f"🎯 What to bet right now ({len(plays)})")
         if not plays:
-            st.success("No bets clear the risk rules right now. Sitting out IS the play — "
+            st.success("Nothing clears the quality bar right now. Sitting out IS the play — "
                        "check back after a refresh.")
         else:
             total_risk = sum((o.yes_ask_prob if o.action == "Buy YES" else o.no_ask_prob or 0)
@@ -161,10 +185,33 @@ def main() -> None:
             cap[0].metric("Recommended bets", len(plays))
             cap[1].metric("Total to stake", f"${total_risk:,.2f}")
             cap[2].metric("Total if all win", f"+${total_win:,.2f}")
-            st.caption("Ranked best-first by expected value after fees. Only bets that "
-                       "cleared every risk rule are shown. These are paper bets.")
+            st.caption("Ranked best-first by expected value after fees. These cleared "
+                       "every risk rule AND the quality bar fit on settled results. "
+                       "They are paper bets and they still lose sometimes.")
             for opp in plays:
                 _render_play(opp)
+
+        if demoted:
+            with st.expander(f"⚠️ {len(demoted)} signal(s) that FAILED the quality bar "
+                             "— shown for research, not for betting"):
+                st.warning(
+                    "On the settled record these were the money-losers: signals with "
+                    "cheap entries or outsized claimed edges went 12/20 (60%) for a "
+                    "+0.3% paper ROI, which is a loss once real fills and fees are "
+                    "counted. The ones above went 14/15 (+21.9%). Big apparent edge "
+                    "usually means the model is wrong, not that the market is."
+                )
+                st.caption(f"Bar: entry ≥ {min_entry:.0%}, |edge| ≤ {max_edge:.0%}, "
+                           f"model conviction ≥ {min_fair:.0%}.")
+                for opp in demoted:
+                    reasons = []
+                    if _entry_cost(opp) < min_entry:
+                        reasons.append(f"entry {_entry_cost(opp):.0%} too cheap")
+                    if abs(opp.gross_edge) > max_edge:
+                        reasons.append(f"claimed edge {abs(opp.gross_edge):.0%} too big")
+                    if _fair_for_side(opp) < min_fair:
+                        reasons.append(f"conviction {_fair_for_side(opp):.0%} too low")
+                    st.markdown(f"**{opp.ticker}** — {', '.join(reasons)}")
 
         st.divider()
         st.subheader("📋 Full market table (all markets, including Watch/Avoid)")

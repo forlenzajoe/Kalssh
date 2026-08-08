@@ -135,17 +135,36 @@ def notify_signals(trades: list, config: Config) -> int:
                     len(trades))
         return 0
 
-    lines, actions = [], []
+    blocks, actions = [], []
     for t in keep:
         url = market_url(t.ticker)
-        lines.append(
-            f"{t.action} {t.ticker} @ up to {t.entry_price * 100:.0f}c "
-            f"x{t.contracts} (~${t.stake_usd:.0f}) | model {t.fair_value:.0%} "
-            f"vs market {t.entry_price:.0%}\n{url}"
+        side = t.side.upper()
+        # Market titles arrive like "Will the **high temp in Philadelphia** be
+        # 86-87° on Jul 26, 2026?" -- strip markdown for the phone.
+        question = (t.title or t.ticker).replace("**", "").strip()
+        win_pct = t.fair_value * 100
+        cost = t.entry_price * 100
+        blocks.append(
+            f"[BET {side}] {question}\n"
+            f"1. Open the market (tap this alert)\n"
+            f"2. Choose {side}\n"
+            f"3. Pay up to {cost:.0f} cents per contract - no more\n"
+            f"4. Size guide: {t.contracts} contracts = about ${t.stake_usd:.0f}\n"
+            f"Model gives {side} a {win_pct:.0f}% chance; the market is "
+            f"charging {cost:.0f}%.\n{url}"
         )
         actions.append((t.ticker.split("-")[0].replace("KXHIGH", "") or "market", url))
-    body = "\n\n".join(lines) + "\n\nPaper signal - you decide and place it yourself."
-    title = f"Kalshi signal x{len(keep)}"
+
+    body = "\n\n".join(blocks) + (
+        "\n\nThis is a model signal, NOT a guaranteed winner. It loses "
+        f"sometimes. Only bet money you can afford to lose."
+    )
+    if len(keep) == 1:
+        t = keep[0]
+        city = t.ticker.split("-")[0].replace("KXHIGH", "") or "market"
+        title = f"BET {t.side.upper()}: {city} @ up to {t.entry_price * 100:.0f}c"
+    else:
+        title = f"Kalshi: {len(keep)} bets found - see details"
 
     topic = str(cfg.get("ntfy_topic", "") or "")
     if topic:
@@ -154,7 +173,7 @@ def notify_signals(trades: list, config: Config) -> int:
                          click=market_url(keep[0].ticker), actions=actions)
         logger.info("Signal push %s for %d signal(s).", "sent" if ok else "FAILED", len(keep))
     if cfg.get("desktop", True):
-        desktop_notify(title, lines[0])
+        desktop_notify(title, blocks[0].splitlines()[0])
     return len(keep)
 
 
