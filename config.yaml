@@ -160,6 +160,10 @@ notifications:
     min_entry_price: 0.60       # skip cheap lottery tickets (<0.55 went 4/9)
     max_edge: 0.25              # "too good to be true" cap (>0.25 went 4/8)
     min_fair_value: 0.85        # only high-conviction sides
+    # Stake sizes to spell out in each alert, so no maths is needed on a phone.
+    # Expected value scales linearly with stake: a bigger bet does not improve
+    # the odds, it multiplies both the win and the loss.
+    stake_tiers: [5, 10, 20, 25]
 
   # Daily liveness report, so a quiet phone means "no edge found" instead of
   # "silently broken" -- those look identical otherwise. Escalates to an urgent

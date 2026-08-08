@@ -105,6 +105,35 @@ def desktop_notify(title: str, message: str) -> bool:
         return False
 
 
+def _stake_table(entry_price: float, config: Config) -> str:
+    """Concrete sizing at the stake amounts actually used, net of Kalshi fees.
+
+    Turns a price into "at $10 you buy N contracts and win $X net", so no
+    arithmetic is needed on a phone. Payout is $1 per winning contract, so
+    profit is contracts x (1 - price) less the fee; a loss forfeits the stake.
+    """
+    from .kalshi.pricing import trade_fee
+
+    tiers = config.get("notifications.signal_alerts.stake_tiers",
+                       [5, 10, 20, 25]) or [5, 10, 20, 25]
+    fee_rate = float(config.get("fees.trade_fee_rate", 0.07))
+
+    lines = []
+    for stake in tiers:
+        contracts = int(float(stake) // entry_price) if entry_price > 0 else 0
+        if contracts <= 0:
+            lines.append(f"  ${float(stake):.0f} -> too small for 1 contract")
+            continue
+        cost = contracts * entry_price
+        fee = trade_fee(entry_price, contracts, fee_rate)
+        net_win = contracts * (1.0 - entry_price) - fee
+        lines.append(
+            f"  ${float(stake):.0f} -> {contracts} contracts "
+            f"(costs ${cost:.2f}) -> win +${net_win:.2f} / lose -${cost:.2f}"
+        )
+    return "\n".join(lines)
+
+
 def _reality_check(config: Config) -> str:
     """A one-line honest footer: what signals like this have ACTUALLY done.
 
@@ -180,11 +209,13 @@ def notify_signals(trades: list, config: Config) -> int:
         win_pct = t.fair_value * 100
         cost = t.entry_price * 100
         blocks.append(
-            f"[BET {side}] {question}\n"
-            f"1. Open the market (tap this alert)\n"
+            f"BET {side} - {question}\n\n"
+            f"WHAT TO DO\n"
+            f"1. Tap this alert to open the market\n"
             f"2. Choose {side}\n"
-            f"3. Pay up to {cost:.0f} cents per contract - no more\n"
-            f"4. Size guide: {t.contracts} contracts = about ${t.stake_usd:.0f}\n"
+            f"3. Pay up to {cost:.0f} cents per contract - no more\n\n"
+            f"HOW MUCH (pick one, net of fees)\n"
+            f"{_stake_table(t.entry_price, config)}\n\n"
             f"Model gives {side} a {win_pct:.0f}% chance; the market is "
             f"charging {cost:.0f}%.\n{url}"
         )
